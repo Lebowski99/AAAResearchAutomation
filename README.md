@@ -1,3 +1,3 @@
-to run AllDegrees.py you need to run the below pip command first to install libraries
+1.)  to run AllDegrees.py you need to run the below pip command first to install libraries
 
-```pip install simplekml shapely tqdm```
+  ```pip install simplekml shapely tqdm```
