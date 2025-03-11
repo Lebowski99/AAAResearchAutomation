@@ -6,10 +6,23 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from xml.etree import ElementTree as ET
 
-# ===============================================
+# ======================================================
 # KMZ OVERLAY BULK AUTOMATION
-# With alphabetical ordering in the final .kmz
-# ===============================================
+# Create <Document> if missing, & alphabetical .kmz order
+# ======================================================
+#
+# This script processes multiple subfolders, each containing:
+#   - Exactly one .kmz ("original overlay" with a single GroundOverlay),
+#   - Several .png overlays.
+# Produces a new .kmz named "<SubfolderName> - transparent.kmz", with:
+#   - All overlays duplicated from the single original overlay,
+#   - Overlays referencing <Icon><href> in a subfolder named <SubfolderName>,
+#   - <Document> (or <Folder>) named <SubfolderName>,
+#   - Overlays sorted by trailing numeric portion in <name>,
+#   - Final .kmz files stored in alphabetical order.
+#
+# Additionally, if there's no <Document> or <Folder> in the original .kml,
+# we create one automatically.
 
 def extract_kmz(kmz_path, extract_to):
     """Extracts the .kmz file into a temporary directory."""
@@ -74,31 +87,38 @@ def modify_kml(kml_path, png_filepaths, subfolder_name):
     - The Icon href for each <GroundOverlay> is set to 'subfolder_name/<filename>.png'.
     - Then reorder them by trailing numeric portion in <name>.
     - Also rename the <Document> or <Folder> node to match 'subfolder_name'.
+    - If there's no <Document> or <Folder>, we create a <Document>.
     """
     namespace = {'kml': 'http://www.opengis.net/kml/2.2'}
-
     tree = ET.parse(kml_path)
     root = tree.getroot()
 
+    # Find all existing ground overlays
     overlays = root.findall(".//kml:GroundOverlay", namespace)
     if not overlays:
         print("No GroundOverlay found in the KML file.")
         return False
     first_overlay = overlays[0]
 
+    # Try to find <Document> or <Folder>
     document_node = root.find(".//kml:Document", namespace)
     if document_node is None:
         document_node = root.find(".//kml:Folder", namespace)
-        if document_node is None:
-            print("Could not find <Document> or <Folder> in KML.")
-            return False
 
-    # Rename the <Document> or <Folder> to match subfolder name
+    # If still none, create a <Document> ourselves and move the overlays under it.
+    if document_node is None:
+        print("No <Document> or <Folder> found in KML; creating one ourselves.")
+        document_node = ET.SubElement(root, "{http://www.opengis.net/kml/2.2}Document")
+        # Move existing GroundOverlay(s) under the new <Document>
+        for ov in overlays:
+            root.remove(ov)
+            document_node.append(ov)
+
+    # Rename <Document> or <Folder> to match subfolder name
     doc_name_el = document_node.find("kml:name", namespace)
     if doc_name_el is not None:
         doc_name_el.text = subfolder_name
     else:
-        # If there's no <name> element, create one
         doc_name_el = ET.SubElement(document_node, "{http://www.opengis.net/kml/2.2}name")
         doc_name_el.text = subfolder_name
 
@@ -129,18 +149,20 @@ def modify_kml(kml_path, png_filepaths, subfolder_name):
 
     # Create overlays for each new PNG
     for (abs_path, fname) in create_list:
+        # Clone the first overlay as a template
         new_overlay = ET.fromstring(ET.tostring(first_overlay))
 
-        # Update <Icon><href>
+        # <Icon><href> => subfolder_name/filename
         icon_href = new_overlay.find(".//kml:Icon/kml:href", namespace)
         if icon_href is not None:
             icon_href.text = f"{subfolder_name}/{fname}"
 
-        # Update <name>
+        # <name> => filename without extension
         overlay_name = new_overlay.find(".//kml:name", namespace)
         if overlay_name is not None:
             overlay_name.text = os.path.splitext(fname)[0]
 
+        # Append the new overlay
         document_node.append(new_overlay)
 
     # Create a subfolder for images inside the extracted KMZ
